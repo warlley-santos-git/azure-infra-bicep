@@ -1,0 +1,10 @@
+# Arquivos de parâmetros com dados pessoais (IP, chave SSH)
+*.local.bicepparam
+
+# JSON compilado do Bicep
+*.json
+!bicepconfig.json
+
+# Chaves
+*.pem
+id_*
