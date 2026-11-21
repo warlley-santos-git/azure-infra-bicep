@@ -8,3 +8,6 @@
 # Chaves
 *.pem
 id_*
+
+# Segredos
+.env

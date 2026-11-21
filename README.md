@@ -1,23 +1,51 @@
 # Infraestrutura no Azure com Bicep
 
-Infraestrutura como código (IaC): um único comando cria uma rede, uma máquina virtual Linux protegida e um cofre de backup no Azure. Outro comando apaga tudo. Nada é criado clicando no portal.
+Infraestrutura como código (IaC) modular: um comando cria rede segmentada, VM Linux protegida, Storage Account, Key Vault e backup, com parâmetros separados para **dev** e **prod**. Antes de criar, o script mostra o que vai mudar (what-if). Outro comando apaga tudo. Nada é criado clicando no portal.
 
-## O que é criado
+## Arquitetura
 
+```mermaid
+flowchart TB
+    admin([Administrador<br/>IP liberado])
+    subgraph rg["Grupo de recursos rg-azure-infra-&lt;ambiente&gt;"]
+        subgraph vnet["VNet 10.x.0.0/16"]
+            subgraph s1["snet-servidores 10.x.1.0/24 · NSG: SSH só do meu IP"]
+                vm["VM Ubuntu 24.04<br/>chave SSH · desliga às 23h<br/>identidade gerenciada"]
+            end
+            subgraph s2["snet-dados 10.x.2.0/24 · NSG: nega Internet<br/>endpoints: Storage e Key Vault"]
+            end
+        end
+        st[("Storage Account<br/>TLS 1.2 · sem acesso público")]
+        kv{{"Key Vault<br/>RBAC · soft delete"}}
+        rsv[["Cofre de backup<br/>só em prod"]]
+    end
+    admin -- SSH 22 --> vm
+    s2 -. regra de rede .-> st
+    s2 -. regra de rede .-> kv
+    vm -- "lê segredos (Key Vault Secrets User)" --> kv
+    rsv -- backup diário --> vm
 ```
-Grupo de recursos: rg-lab-azure
-│
-├── Rede virtual lab-vnet (10.10.0.0/16)
-│   └── Sub-rede snet-servidores (10.10.1.0/24)
-│       └── NSG lab-nsg ── SSH (22) liberado só para o meu IP
-│
-├── VM lab-vm01 (Ubuntu 24.04, login só por chave SSH)
-│   ├── IP público estático
-│   └── Desligamento automático todo dia às 23h
-│
-└── Cofre de backup lab-rsv
-    └── Política diária, retenção de 7 dias, aplicada à VM
-```
+
+## Módulos
+
+| Arquivo | O que cria |
+| --- | --- |
+| `infra/main.bicep` | Orquestra os módulos e aplica as tags |
+| `infra/modules/network.bicep` | VNet, 2 sub-redes, 2 NSGs, endpoints de serviço |
+| `infra/modules/vm.bicep` | VM Ubuntu, IP público, NIC, desligamento automático |
+| `infra/modules/storage.bicep` | Storage Account fechada por rede, container privado, lixeira de 7 dias |
+| `infra/modules/keyvault.bicep` | Key Vault com RBAC; permissão de leitura para a identidade da VM |
+| `infra/modules/backup.bicep` | Cofre Recovery Services, política diária, proteção da VM |
+
+## Ambientes
+
+| Parâmetro | dev | prod |
+| --- | --- | --- |
+| Rede | 10.10.0.0/16 | 10.20.0.0/16 |
+| VM | Standard_B1s | Standard_B2s |
+| Storage | LRS | ZRS (redundância entre zonas) |
+| Backup | desligado | diário, 30 dias |
+| Proteção contra exclusão do Key Vault | não | sim |
 
 ## Decisões de segurança e custo
 
@@ -25,17 +53,38 @@ Grupo de recursos: rg-lab-azure
 | --- | --- |
 | SSH só por chave, senha desativada | Evita ataques de força bruta |
 | NSG libera a porta 22 só para um IP | A VM não fica exposta para a internet |
+| Storage e Key Vault com `defaultAction: Deny` | Só a sub-rede de dados e o IP do administrador acessam |
+| Storage sem chave compartilhada nem blob público | Acesso só por Entra ID; evita vazamento por link |
+| Key Vault com RBAC e identidade gerenciada | A VM lê segredos sem senha guardada no código |
 | Desligamento automático diário | VM esquecida ligada é a principal causa de custo em laboratório |
-| VM pequena e disco padrão (HDD) | Custo mínimo |
-| Tags em todos os recursos | Facilita rastrear custo por projeto |
+| Tags em todos os recursos | Facilita rastrear custo por projeto e ambiente |
+| What-if antes do deploy | Mostra o que vai ser criado, alterado ou apagado antes de aplicar |
 | Script de remoção | Apaga tudo, inclusive o backup, que costuma travar a exclusão |
+
+## Custo estimado
+
+Valores **aproximados**, em dólar, região Brazil South, para o ambiente ligado o mês inteiro. Confirme na [Calculadora de Preços do Azure](https://azure.microsoft.com/pricing/calculator/), porque os preços mudam.
+
+| Recurso | dev | prod |
+| --- | --- | --- |
+| VM (B1s / B2s), ligada 24h | ~US$ 10 | ~US$ 40 |
+| Disco do SO 30 GB HDD | ~US$ 2 | ~US$ 2 |
+| IP público estático | ~US$ 4 | ~US$ 4 |
+| Storage (poucos GB) | < US$ 1 | < US$ 1 |
+| Key Vault (poucas operações) | < US$ 1 | < US$ 1 |
+| Backup (1 VM, 30 dias) | — | ~US$ 10 |
+
+Com o desligamento às 23h e uso só durante os testes, o custo real fica bem menor. Para não pagar nada, rode `.\remover.ps1` ao terminar.
 
 ## Pré-requisitos
 
-- Conta no Azure (a conta gratuita serve; confira qual tamanho de VM entra na cota)
-- [Azure CLI](https://aka.ms/installazurecli) instalada
-- PowerShell 7 (ou Windows PowerShell)
-- Chave SSH: `ssh-keygen -t ed25519`
+```powershell
+winget install -e --id Microsoft.AzureCLI
+az bicep install
+ssh-keygen -t ed25519
+```
+
+Conta no Azure (a conta gratuita serve; confira qual tamanho de VM entra na cota) e PowerShell 7.
 
 ## Como usar
 
@@ -43,38 +92,57 @@ Grupo de recursos: rg-lab-azure
 # 1. Login
 az login
 
-# 2. Parâmetros: copie o modelo e preencha seu IP e sua chave pública
-Copy-Item infra\main.bicepparam infra\main.local.bicepparam
+# 2. Parâmetros: copie o modelo do ambiente e preencha seu IP e sua chave pública
+Copy-Item infra\params\dev.bicepparam infra\params\dev.local.bicepparam
 
-# 3. Ver o que seria criado, sem criar nada
-.\deploy.ps1 -SoValidar
+# 3. Build, lint e what-if, sem criar nada
+.\deploy.ps1 -Ambiente dev -SoValidar
 
-# 4. Criar
-.\deploy.ps1
+# 4. Criar (pede confirmação depois do what-if)
+.\deploy.ps1 -Ambiente dev
 
 # 5. Acessar a VM
 ssh azureuser@<ip-publico>
 
 # 6. Apagar tudo ao terminar
-.\remover.ps1
+.\remover.ps1 -Ambiente dev
 ```
 
-Descubra seu IP público em qualquer site como "qual é meu IP".
+### Validar sem assinatura Azure
+
+Build e lint rodam localmente, sem login:
+
+```powershell
+az bicep build --file infra\main.bicep
+az bicep lint --file infra\main.bicep
+az bicep build-params --file infra\params\prod.bicepparam
+```
+
+As regras do lint estão em `bicepconfig.json` (parâmetros e variáveis sem uso, segredos em saídas e URLs fixas viram erro).
+
+## Prints
+
+<!-- Adicione as imagens em docs/img/ e descomente as linhas abaixo -->
+<!-- ![What-if](docs/img/what-if.png) -->
+<!-- ![Recursos no portal](docs/img/portal-recursos.png) -->
+<!-- ![Visualizador do Bicep](docs/img/bicep-visualizer.png) -->
 
 ## Estrutura
 
 ```
 azure-infra-bicep/
 ├── infra/
-│   ├── main.bicep          # toda a infraestrutura
-│   └── main.bicepparam     # modelo de parâmetros
-├── deploy.ps1              # cria o grupo de recursos e implanta
-└── remover.ps1             # para o backup e apaga tudo
+│   ├── main.bicep              # orquestra os módulos
+│   ├── modules/                # network, vm, storage, keyvault, backup
+│   └── params/                 # dev.bicepparam, prod.bicepparam
+├── bicepconfig.json            # regras do linter
+├── deploy.ps1                  # build, lint, what-if e deploy
+└── remover.ps1                 # para o backup e apaga tudo
 ```
 
 ## O que pratiquei
 
-Bicep (IaC), redes virtuais e NSG, VM Linux com autenticação por chave, Azure Backup (cofre, política e proteção de VM), controle de custos, Azure CLI e automação com PowerShell. São temas cobrados na certificação AZ-104.
+Bicep modular (IaC), parâmetros por ambiente, redes virtuais, NSG e endpoints de serviço, VM Linux com autenticação por chave, Storage e Key Vault fechados por rede, RBAC e identidade gerenciada, Azure Backup, what-if, controle de custos, Azure CLI e automação com PowerShell. São temas cobrados na certificação AZ-104.
 
 ---
 

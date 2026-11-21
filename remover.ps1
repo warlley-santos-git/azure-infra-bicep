@@ -9,16 +9,22 @@
       2. Para o backup da VM e apaga os dados de backup
       3. Apaga o grupo de recursos inteiro
 
+    Observação: o Key Vault fica em exclusão reversível por 7 dias após apagar.
+    Em prod (proteção contra exclusão ligada), ele não pode ser purgado antes disso.
+
 .EXAMPLE
-    .\remover.ps1
+    .\remover.ps1 -Ambiente dev
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$GrupoRecursos = 'rg-lab-azure',
-    [string]$Prefixo       = 'lab'
+    [ValidateSet('dev', 'prod')]
+    [string]$Ambiente = 'dev'
 )
 
 $ErrorActionPreference = 'Stop'
+
+$GrupoRecursos = "rg-azure-infra-$Ambiente"
+$Prefixo       = if ($Ambiente -eq 'prod') { 'labprd' } else { 'labdev' }
 
 $cofre = "$Prefixo-rsv"
 $vm    = "$Prefixo-vm01"
