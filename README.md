@@ -122,10 +122,38 @@ As regras do lint estão em `bicepconfig.json` (parâmetros e variáveis sem uso
 
 ## Prints
 
-<!-- Adicione as imagens em docs/img/ e descomente as linhas abaixo -->
-<!-- ![What-if](docs/img/what-if.png) -->
-<!-- ![Recursos no portal](docs/img/portal-recursos.png) -->
-<!-- ![Visualizador do Bicep](docs/img/bicep-visualizer.png) -->
+Passo a passo para gerar as imagens: [docs/COMO-FAZER-PRINTS.md](docs/COMO-FAZER-PRINTS.md). Prints feitos no ambiente dev, em East US 2 com a VM Standard_D2als_v7: o B1s estava sem capacidade na assinatura no dia do teste.
+
+**1. What-if antes do deploy:** o que será criado
+
+![What-if](docs/img/01-what-if.png)
+
+**2. Saída do deploy no terminal:** IP, Storage, Key Vault
+
+![Saída do deploy](docs/img/02-saida-deploy.png)
+
+**3. Grupo de recursos:** todos os recursos criados
+
+![Grupo de recursos](docs/img/03-grupo-recursos.png)
+
+**4. VNet:** as duas sub-redes e seus NSGs
+
+![VNet](docs/img/04-vnet-subredes.png)
+
+**5. VM:** visão geral (Ubuntu 24.04, IP público, sub-rede)
+
+![VM](docs/img/05-vm.png)
+
+**6. Storage:** rede restrita à sub-rede e ao meu IP
+
+![Storage](docs/img/06-storage-rede.png)
+
+**7. Key Vault:** permissão da identidade da VM (RBAC)
+
+![Key Vault](docs/img/07-keyvault-rbac.png)
+
+<!-- **8. Backup (prod):** VM protegida pela política diária -->
+<!-- ![Backup](docs/img/08-backup.png) -->
 
 ## Estrutura
 
