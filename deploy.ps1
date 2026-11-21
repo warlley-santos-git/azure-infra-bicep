@@ -62,7 +62,9 @@ $saida = az deployment group create `
     --resource-group $GrupoRecursos `
     --name "$Ambiente-$(Get-Date -Format yyyyMMdd-HHmm)" `
     --parameters $ArquivoParam `
-    --query properties.outputs -o json | ConvertFrom-Json
+    --query properties.outputs -o json
+if ($LASTEXITCODE -ne 0) { throw 'Falha na implantação. Veja o erro acima.' }
+$saida = $saida | ConvertFrom-Json
 
 Write-Host "`nImplantação concluída." -ForegroundColor Green
 Write-Host "IP público : $($saida.ipPublicoVm.value)"
